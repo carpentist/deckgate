@@ -1,0 +1,31 @@
+appId: com.deckgate.app
+productName: Deckgate
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources/hooks
+    to: hooks
+  - from: resources/tray.png
+    to: tray.png
+  - from: build/runtime
+    to: runtime
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: Deckgate-${version}-Setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Deckgate
+  deleteAppDataOnUninstall: true
+  include: resources/installer.nsh

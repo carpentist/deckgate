@@ -1,0 +1,51 @@
+{
+  "name": "deckgate",
+  "productName": "Deckgate",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A local permission deck and session monitor for Claude Code CLI",
+  "author": "Deckgate contributors",
+  "license": "MIT",
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "icons": "node scripts/generate-icons.mjs",
+    "runtime": "node scripts/prepare-runtime.mjs",
+    "dist": "npm run icons && npm run runtime && npm run build && node scripts/build-installer.mjs",
+    "pack": "npm run icons && npm run runtime && npm run build && node scripts/build-installer.mjs --dir"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.4",
+    "lucide-react": "^1.63.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.7",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "png-to-ico": "^3.0.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^5.0.5"
+  }
+}

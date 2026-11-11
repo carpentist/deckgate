@@ -1,0 +1,17 @@
+node_modules/
+out/
+dist/
+release/
+coverage/
+build/
+*.log
+.tmp/
+.env
+.env.*
+!.env.example
+.claude/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
