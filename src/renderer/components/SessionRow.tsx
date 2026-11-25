@@ -1,5 +1,6 @@
 import { AlertCircle, ChevronRight } from 'lucide-react'
 import type { JSX } from 'react'
+import { isPermissionModeInterceptable } from '@shared/autoApprove'
 import type { Session } from '@shared/types/session'
 import { formatDuration, formatRelative, shortSessionId } from '@renderer/lib/format'
 import { ATTENTION_META } from '@renderer/lib/status'
@@ -9,6 +10,14 @@ import { StatusBadge } from './StatusBadge'
 
 export function SessionRow({ session, now }: { session: Session; now: number }): JSX.Element {
   const openSession = useWatcherStore((state) => state.openSession)
+  const settings = useWatcherStore((state) => state.snapshot?.settings)
+  const policy = useWatcherStore(
+    (state) => state.snapshot?.sessionPolicies?.[session.sessionId],
+  )
+  const autoActive =
+    (settings?.approvalEnabled ?? false) &&
+    (policy?.autoApprove ?? false) &&
+    isPermissionModeInterceptable(session.permissionMode)
   const isTerminal =
     session.status === 'COMPLETED' || session.status === 'STOPPED' || session.status === 'FAILED'
   const end = isTerminal ? session.lastActivityAt : now
@@ -39,6 +48,11 @@ export function SessionRow({ session, now }: { session: Session; now: number }):
             {shortSessionId(session.sessionId)}
           </span>
           <StatusBadge status={session.status} />
+          {autoActive ? (
+            <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-300">
+              自动
+            </span>
+          ) : null}
           <span className="ml-auto shrink-0 text-[10px] tabular-nums text-zinc-600">
             {formatRelative(session.lastActivityAt, now)}
           </span>

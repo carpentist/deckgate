@@ -33,6 +33,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     statusReason: '正在使用 PowerShell',
     confidence: 'high',
     currentTool: 'PowerShell',
+    permissionMode: 'default',
     lastError: null,
     attention: null,
     startedAt: 1000,

@@ -1,7 +1,7 @@
 {
   "name": "deckgate",
   "productName": "Deckgate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "A local permission deck and session monitor for Claude Code CLI",
   "author": "Deckgate contributors",

@@ -95,3 +95,18 @@ export function isWaitingStatus(status: SessionStatus): boolean {
 export function isAbnormalStatus(status: SessionStatus): boolean {
   return status === 'FAILED' || status === 'DISCONNECTED'
 }
+
+const PERMISSION_MODE_LABELS: Record<string, string> = {
+  default: '手动',
+  manual: '手动',
+  acceptEdits: '接受编辑',
+  auto: '自动（Claude 分类器）',
+  dontAsk: '不询问',
+  plan: '计划',
+  bypassPermissions: '跳过权限',
+}
+
+export function permissionModeLabel(mode: string | null): string {
+  if (!mode) return '等待会话事件'
+  return PERMISSION_MODE_LABELS[mode] ?? mode
+}

@@ -14,8 +14,14 @@ import {
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
+import { isPermissionModeInterceptable } from '@shared/autoApprove'
 import { IPC_CHANNELS } from '@shared/ipc'
-import { copyTextInputSchema, openPathInputSchema } from '@shared/schemas/ipc'
+import {
+  copyTextInputSchema,
+  openPathInputSchema,
+  sessionIdSchema,
+  sessionPolicyPatchSchema,
+} from '@shared/schemas/ipc'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/types/settings'
 import type { HookStatus, Session, WatcherSnapshot } from '@shared/types/session'
 import {
@@ -29,6 +35,7 @@ import { NotificationService } from './notification/service'
 import { PersistenceService } from './persistence/service'
 import { Database } from './persistence/database'
 import { ProcessMonitor } from './process/processMonitor'
+import { SessionPolicyStore } from './sessionPolicy/store'
 import { SessionRegistry } from './session/registry'
 import { SessionFileWatcher } from './session/sessionFileWatcher'
 import { SettingsStore } from './settings/store'
@@ -42,6 +49,7 @@ const NORMAL_MIN_HEIGHT = 520
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 const registry = new SessionRegistry()
+const sessionPolicies = new SessionPolicyStore()
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -100,10 +108,6 @@ function resolveSettingsPath(): string {
   return override ? override : join(homedir(), '.claude', 'settings.json')
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function currentHookStatus(): HookStatus {
   return (
     hookStatus ?? {
@@ -121,13 +125,28 @@ function currentHookStatus(): HookStatus {
 }
 
 function buildSnapshot(): WatcherSnapshot {
+  const sessions = registry.snapshot()
+  sessionPolicies.prune(new Set(sessions.map((session) => session.sessionId)))
   return {
-    sessions: registry.snapshot(),
+    sessions,
     generatedAt: Date.now(),
     hookStatus: currentHookStatus(),
     settings: { ...appSettings },
     approvals: approvalCoordinator?.getRequests() ?? [],
+    sessionPolicies: sessionPolicies.snapshot(),
   }
+}
+
+function autoApproveSessionCount(): number {
+  if (!appSettings.approvalEnabled) return 0
+  return registry
+    .snapshot()
+    .filter((session) => sessionPolicies.get(session.sessionId).autoApprove).length
+}
+
+function stopAllSessionAutoApprove(): void {
+  sessionPolicies.clearAllAuto()
+  broadcast()
 }
 
 function showMainWindow(): void {
@@ -204,18 +223,17 @@ function buildTrayMenu(pending: Session[]): MenuItemConstructorOptions[] {
     })
   }
 
-  if (appSettings.autoApproveAll) {
+  const autoCount = autoApproveSessionCount()
+  if (autoCount > 0) {
     items.push(
       { type: 'separator' },
       {
-        label: '停止自动授权（立即）',
-        click: () => void updateAppSettings({ autoApproveAll: false }),
+        label: `自动授权会话：${autoCount}`,
+        enabled: false,
       },
       {
-        label: appSettings.autoApproveAllProjects
-          ? '自动授权项目：所有项目'
-          : `自动授权项目：${appSettings.autoApproveProjects.length}`,
-        enabled: false,
+        label: '停止所有会话自动授权（立即）',
+        click: stopAllSessionAutoApprove,
       },
     )
   }
@@ -248,14 +266,11 @@ function buildTrayMenu(pending: Session[]): MenuItemConstructorOptions[] {
       click: () => void updateAppSettings({ miniMode: !appSettings.miniMode }),
     },
     {
-      label: '自动授权（高风险）',
+      label: '应用内授权',
       type: 'checkbox',
-      checked: appSettings.autoApproveAll,
+      checked: appSettings.approvalEnabled,
       click: () =>
-        void updateAppSettings({
-          autoApproveAll: !appSettings.autoApproveAll,
-          ...(appSettings.autoApproveAll ? {} : { approvalEnabled: true }),
-        }),
+        void updateAppSettings({ approvalEnabled: !appSettings.approvalEnabled }),
     },
     { type: 'separator' },
     { label: '打开窗口', click: showMainWindow },
@@ -283,20 +298,15 @@ function updateTray(): void {
       soundEnabled: appSettings.soundEnabled,
       alwaysOnTop: appSettings.alwaysOnTop,
       miniMode: appSettings.miniMode,
-      autoApproveAll: appSettings.autoApproveAll,
       approvalEnabled: appSettings.approvalEnabled,
-      autoApproveAllProjects: appSettings.autoApproveAllProjects,
-      autoApproveProjects: appSettings.autoApproveProjects.length,
+      autoApproveSessions: autoApproveSessionCount(),
     },
   })
   if (signature === lastTraySignature) return
   lastTraySignature = signature
   const total = pending.length + approvals.length
-  const autoLabel = appSettings.autoApproveAll
-    ? appSettings.autoApproveAllProjects
-      ? ' · 自动授权（所有项目）'
-      : ` · 自动授权${appSettings.autoApproveProjects.length > 0 ? `（${appSettings.autoApproveProjects.length} 项目）` : '（未选项目）'}`
-    : ''
+  const autoCount = autoApproveSessionCount()
+  const autoLabel = autoCount > 0 ? ` · 自动授权 ${autoCount} 会话` : ''
   tray.setToolTip(
     total > 0
       ? `Deckgate · ${total} 个待处理${autoLabel}`
@@ -385,51 +395,16 @@ async function applyMiniMode(window: BrowserWindow, mini: boolean): Promise<void
   window.setBounds(bounds, true)
 }
 
-async function confirmAutoApprove(): Promise<boolean> {
-  const options = {
-    type: 'warning' as const,
-    buttons: ['取消', '开启自动授权'],
-    defaultId: 0,
-    cancelId: 0,
-    title: '开启自动授权',
-    message: '只对勾选的项目自动允许普通工具权限？',
-    detail: [
-      '不会修改 Claude Code 的 ~/.claude 权限设置，也不会添加“总是允许”规则。',
-      '默认只对“自动授权项目”中勾选的项目生效；如果你另外开启“所有项目”，则所有项目都生效。',
-      '危险工具/命令黑名单仍会拦截并转为手动卡片；AskUserQuestion 仍回退原终端。',
-      '启用后，匹配的权限请求会被绕过，不再询问你。',
-    ].join('\n'),
-  }
-  const window = mainWindow
-  const result = window
-    ? await dialog.showMessageBox(window, options)
-    : await dialog.showMessageBox(options)
-  return result.response === 1
-}
-
 async function updateAppSettings(patch: unknown): Promise<WatcherSnapshot> {
   if (!settingsStore) throw new Error('设置尚未初始化')
-  const patchRecord = isRecord(patch) ? patch : {}
-  const enablingAuto =
-    patchRecord['autoApproveAll'] === true && !appSettings.autoApproveAll
-
-  if (enablingAuto && !(await confirmAutoApprove())) {
-    return buildSnapshot()
-  }
-
-  const effectivePatch: unknown = enablingAuto
-    ? { ...patchRecord, approvalEnabled: true }
-    : patch
 
   const previous = appSettings
-  appSettings = await settingsStore.update(effectivePatch)
-  if (!appSettings.approvalEnabled && appSettings.autoApproveAll) {
-    appSettings = await settingsStore.update({ autoApproveAll: false })
-  }
+  appSettings = await settingsStore.update(patch)
   if (!previous.useSessionFileSignals && appSettings.useSessionFileSignals) {
     sessionFileWatcher?.refresh()
   }
   if (previous.approvalEnabled && !appSettings.approvalEnabled) {
+    sessionPolicies.clearAllAuto()
     approvalCoordinator?.cancelAll()
   }
   try {
@@ -595,6 +570,22 @@ function registerIpc(): void {
     updateAppSettings(patch),
   )
 
+  ipcMain.handle(
+    IPC_CHANNELS.updateSessionPolicy,
+    (_event, sessionId: unknown, patch: unknown) => {
+      const parsedId = sessionIdSchema.safeParse(sessionId)
+      if (!parsedId.success) throw new Error('无效的会话')
+      if (!registry.get(parsedId.data)) throw new Error('会话不存在或已清除')
+
+      const parsedPatch = sessionPolicyPatchSchema.safeParse(patch)
+      if (!parsedPatch.success) throw new Error('无效的会话设置')
+
+      sessionPolicies.update(parsedId.data, parsedPatch.data)
+      broadcast()
+      return buildSnapshot()
+    },
+  )
+
   ipcMain.handle(IPC_CHANNELS.hideWindow, () => {
     hideMainWindow()
   })
@@ -639,6 +630,7 @@ function registerIpc(): void {
 
     await persistence.clearHistory()
     registry.clear()
+    sessionPolicies.clearAll()
     broadcast()
   })
 
@@ -845,6 +837,7 @@ if (!hasSingleInstanceLock) {
     approvalCoordinator = new ApprovalCoordinator({
       appDataDir: approvalDataDir(),
       getSettings: () => appSettings,
+      getSessionPolicy: (sessionId) => sessionPolicies.get(sessionId),
       getSessionInfo: (sessionId, cwd) => {
         const session = registry.get(sessionId)
         const resolvedCwd = session?.cwd || cwd || ''
@@ -853,6 +846,7 @@ if (!hasSingleInstanceLock) {
             session?.projectName ??
             (resolvedCwd ? basename(resolvedCwd) : '未知目录'),
           cwd: resolvedCwd,
+          permissionMode: session?.permissionMode ?? null,
         }
       },
       onRequestsChanged: () => broadcast(),
@@ -881,6 +875,14 @@ if (!hasSingleInstanceLock) {
       getSettings: () => appSettings,
       isApprovalAvailable: () =>
         appSettings.approvalEnabled && (hookStatus?.gateInstalled ?? false),
+      isSessionAutoApproveActive: (sessionId) => {
+        const session = registry.get(sessionId)
+        return (
+          appSettings.approvalEnabled &&
+          sessionPolicies.get(sessionId).autoApprove &&
+          isPermissionModeInterceptable(session?.permissionMode ?? null)
+        )
+      },
       showWindow: showMainWindow,
       focusSession: (sessionId) => {
         void focusSessionFromNotification(sessionId)
@@ -897,6 +899,11 @@ if (!hasSingleInstanceLock) {
       resolveSpoolDir(),
       (event) => {
         registry.apply(event)
+        if (event.name === 'SessionStart') {
+          sessionPolicies.resetAuto(event.sessionId)
+        } else if (event.name === 'SessionEnd') {
+          sessionPolicies.clear(event.sessionId)
+        }
         const session = registry.get(event.sessionId)
         if (session) notificationService?.handleHookEvent(event, session)
         if (!app.isPackaged) {
@@ -937,6 +944,7 @@ if (!hasSingleInstanceLock) {
       onAlive: (sessionId) => registry.markAlive(sessionId),
       onDead: (sessionId) => {
         const result = registry.markProcessDead(sessionId)
+        sessionPolicies.clear(sessionId)
         if (result.abnormal) {
           const session = registry.get(sessionId)
           if (session) notificationService?.notifyAbnormal(session)

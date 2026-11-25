@@ -18,6 +18,7 @@ const ATTENTION_DEDUPE_MS = 10_000
 interface NotificationServiceOptions {
   getSettings: () => AppSettings
   isApprovalAvailable: () => boolean
+  isSessionAutoApproveActive: (sessionId: string) => boolean
   showWindow: () => void
   focusSession: (sessionId: string) => void
   playSound: (kind: SoundKind) => void
@@ -37,8 +38,7 @@ export class NotificationService {
   constructor(private readonly options: NotificationServiceOptions) {}
 
   handleHookEvent(event: NormalizedHookEvent, session: Session): void {
-    const settings = this.options.getSettings()
-    if (settings.approvalEnabled && settings.autoApproveAll) {
+    if (this.options.isSessionAutoApproveActive(session.sessionId)) {
       if (event.name === 'PermissionRequest' && event.toolName !== 'AskUserQuestion') {
         return
       }

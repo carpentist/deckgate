@@ -14,6 +14,7 @@ import {
   type JSX,
   type WheelEvent,
 } from 'react'
+import { isPermissionModeInterceptable } from '@shared/autoApprove'
 import type { ApprovalRequestView } from '@shared/types/settings'
 import type { Session } from '@shared/types/session'
 import { formatRelative } from '@renderer/lib/format'
@@ -92,6 +93,13 @@ export function MiniBar(): JSX.Element {
   const cardApproval = selected
     ? (approvals.find((approval) => approval.sessionId === selected.sessionId) ?? null)
     : null
+  const selectedPolicy = selected
+    ? snapshot?.sessionPolicies?.[selected.sessionId]
+    : null
+  const autoActive =
+    (settings?.approvalEnabled ?? false) &&
+    (selectedPolicy?.autoApprove ?? false) &&
+    (selected ? isPermissionModeInterceptable(selected.permissionMode) : false)
 
   useEffect(() => {
     setError(null)
@@ -242,6 +250,11 @@ export function MiniBar(): JSX.Element {
                 <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-zinc-100">
                   {selected.projectName}
                 </span>
+                {autoActive ? (
+                  <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[8px] text-amber-300">
+                    自动
+                  </span>
+                ) : null}
                 <span className={cn('shrink-0 text-[9px]', selectedMeta.text)}>
                   {selectedMeta.label}
                 </span>

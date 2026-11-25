@@ -236,6 +236,7 @@ export class PersistenceService {
         statusReason: wasActive ? '应用重启，等待新的会话事件' : row.statusReason,
         confidence: wasActive ? 'low' : (row.confidence as Session['confidence']),
         currentTool: wasActive ? null : row.currentTool,
+        permissionMode: null,
         lastError: row.lastError,
         attention: wasActive ? null : parseAttention(row.attention),
         startedAt: row.startedAt,

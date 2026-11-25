@@ -277,6 +277,24 @@ describe('SessionRegistry', () => {
     expect(session?.recentEvents).toHaveLength(3)
   })
 
+  it('tracks the latest permission mode from hook events', () => {
+    const registry = new SessionRegistry()
+    registry.apply(
+      makeEvent({
+        name: 'PreToolUse',
+        toolName: 'PowerShell',
+        permissionMode: 'auto',
+        receivedAt: 1_000,
+      }),
+    )
+    expect(registry.get('session-1')?.permissionMode).toBe('auto')
+
+    registry.apply(
+      makeEvent({ name: 'UserPromptSubmit', permissionMode: 'default', receivedAt: 2_000 }),
+    )
+    expect(registry.get('session-1')?.permissionMode).toBe('default')
+  })
+
   it('keeps two sessions with the same cwd separate', () => {
     const registry = new SessionRegistry()
     registry.apply(makeEvent({ sessionId: 'session-a', name: 'SessionStart', receivedAt: 1_000 }))

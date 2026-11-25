@@ -13,6 +13,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     statusReason: '正在工作',
     confidence: 'high',
     currentTool: null,
+    permissionMode: 'default',
     lastError: null,
     attention: null,
     startedAt: 1000,

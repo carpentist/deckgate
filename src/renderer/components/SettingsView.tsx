@@ -1,9 +1,5 @@
 import { Bell, ChevronLeft, Download, Trash2, Volume2, X } from 'lucide-react'
-import { useMemo, type JSX, type ReactNode } from 'react'
-import {
-  isProjectAutoApproved,
-  normalizeProjectPath,
-} from '@shared/autoApprove'
+import { type JSX, type ReactNode } from 'react'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/types/settings'
 import { playSound } from '@renderer/lib/sound'
 import { cn } from '@renderer/lib/utils'
@@ -65,27 +61,9 @@ export function SettingsView(): JSX.Element {
   }
 
   const gateMissing = settings.approvalEnabled && !(hookStatus?.gateInstalled ?? false)
-  const projects = useMemo(() => {
-    const map = new Map<string, { name: string; cwd: string }>()
-    for (const session of snapshot?.sessions ?? []) {
-      if (!session.cwd) continue
-      const key = normalizeProjectPath(session.cwd)
-      if (!key || map.has(key)) continue
-      map.set(key, { name: session.projectName, cwd: session.cwd })
-    }
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
-  }, [snapshot?.sessions])
-
-  const selectedProjectCount = settings.autoApproveProjects.length
-
-  function toggleProject(cwd: string, checked: boolean): void {
-    const key = normalizeProjectPath(cwd)
-    const existing = settings.autoApproveProjects
-    const next = checked
-      ? [...existing.filter((project) => normalizeProjectPath(project) !== key), cwd]
-      : existing.filter((project) => normalizeProjectPath(project) !== key)
-    patch({ autoApproveProjects: next })
-  }
+  const autoSessionCount = Object.values(snapshot?.sessionPolicies ?? {}).filter(
+    (policy) => policy.autoApprove,
+  ).length
 
   function linesToArray(value: string): string[] {
     return value
@@ -96,8 +74,6 @@ export function SettingsView(): JSX.Element {
 
   function resetAutoDefaults(): void {
     patch({
-      autoApproveAllProjects: false,
-      autoApproveProjects: [],
       autoApproveBlockedTools: [...DEFAULT_APP_SETTINGS.autoApproveBlockedTools],
       autoApproveBlockedCommands: [...DEFAULT_APP_SETTINGS.autoApproveBlockedCommands],
     })
@@ -111,7 +87,7 @@ export function SettingsView(): JSX.Element {
         </Button>
         <div className="min-w-0 flex-1">
           <p className="text-[12px] font-medium text-zinc-100">设置</p>
-          <p className="text-[10px] text-zinc-500">本地运行 · 仅监控与提醒</p>
+          <p className="text-[10px] text-zinc-500">本地运行 · 监控与授权</p>
         </div>
         <Button
           size="icon"
@@ -312,142 +288,56 @@ export function SettingsView(): JSX.Element {
         </Section>
 
         <Section
-          title="快速授权"
-          note="开启后，普通工具权限可在本应用点击允许/拒绝。最长等待 10 分钟；超时、应用关闭或遇到提问时回退原终端。"
+          title="应用内授权"
+          note="总闸只决定 Deckgate 能否参与权限请求；自动授权要在每个会话详情里单独开启。最长等待 10 分钟；超时、应用关闭或遇到提问时回退原终端。"
         >
-          <Row label="应用内授权" description="默认关闭；仅对普通工具权限生效">
+          <Row label="允许 Deckgate 参与权限" description="默认关闭；关闭后所有请求回到原终端">
             <Switch
               checked={settings.approvalEnabled}
-              onCheckedChange={(checked) =>
-                patch(
-                  checked
-                    ? { approvalEnabled: true }
-                    : { approvalEnabled: false, autoApproveAll: false },
-                )
-              }
-              label="应用内授权"
+              onCheckedChange={(checked) => patch({ approvalEnabled: checked })}
+              label="允许 Deckgate 参与权限"
             />
           </Row>
-          <Row
-            label="自动授权总开关（高风险）"
-            description="只对下方勾选的项目生效；不会修改 .claude 设置"
-          >
-            <Switch
-              checked={settings.autoApproveAll}
-              onCheckedChange={(checked) =>
-                patch(
-                  checked
-                    ? { autoApproveAll: true, approvalEnabled: true }
-                    : { autoApproveAll: false },
-                )
-              }
-              label="自动授权总开关"
-            />
-          </Row>
-          {settings.autoApproveAll ? (
-            <div className="my-1.5 rounded-md border border-rose-500/30 bg-rose-500/[0.06] px-2 py-1.5 text-[9px] leading-relaxed text-rose-200/90">
-              自动授权已开启：只对勾选的项目或“所有项目”开关自动放行普通工具权限，不弹卡片；不会写入 Claude 的权限规则。
-              危险工具/命令黑名单仍会拦截并转为手动卡片。AskUserQuestion 仍需回原终端。每次自动授权会记录在会话时间线。
+          {settings.approvalEnabled ? (
+            <div className="my-1.5 rounded-md border border-amber-500/30 bg-amber-500/[0.06] px-2 py-1.5 text-[9px] leading-relaxed text-amber-200/90">
+              总闸已开启。自动授权按会话生效：在会话详情中打开“本会话自动授权”。
+              当前有 {autoSessionCount} 个会话开启。auto / dontAsk / plan / bypassPermissions
+              模式由 Claude 自行处理，Deckgate 不代答。
             </div>
           ) : (
             <p className="my-1.5 rounded-md border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-[9px] leading-relaxed text-zinc-500">
-              自动授权总开关关闭时，下面的项目选择、所有项目和黑名单只保存配置，不会生效，控件不可编辑。请先开启总开关。
+              总闸关闭时，所有权限请求回到原终端；会话级自动授权也不会生效。
             </p>
           )}
-
-          <div className="py-1.5">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] text-zinc-300">自动授权项目</p>
-              <span className="text-[9px] tabular-nums text-zinc-500">
-                {settings.autoApproveAllProjects
-                  ? '所有项目'
-                  : `已选 ${selectedProjectCount}`}
-              </span>
-            </div>
-            <p className="mt-0.5 text-[9px] leading-relaxed text-zinc-600">
-              未勾选的项目仍会弹出手动授权卡片。
-            </p>
-            {projects.length === 0 ? (
-              <p className="mt-1 text-[9px] text-zinc-600">
-                启动 Claude Code 会话后，项目会出现在这里。
-              </p>
-            ) : (
-              <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">
-                {projects.map((project) => (
-                  <div
-                    key={project.cwd}
-                    className="flex items-center justify-between gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/30 px-2 py-1.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-[10px] text-zinc-300">{project.name}</p>
-                      <p className="truncate text-[9px] text-zinc-600" title={project.cwd}>
-                        {project.cwd}
-                      </p>
-                    </div>
-                    <Switch
-                      checked={
-                        settings.autoApproveAllProjects ||
-                        isProjectAutoApproved(project.cwd, settings.autoApproveProjects)
-                      }
-                      onCheckedChange={(checked) => toggleProject(project.cwd, checked)}
-                      disabled={!settings.autoApproveAll || settings.autoApproveAllProjects}
-                      label={`自动授权 ${project.name}`}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-            {settings.autoApproveAll &&
-            !settings.autoApproveAllProjects &&
-            selectedProjectCount === 0 ? (
-              <p className="mt-1 rounded-md border border-amber-500/25 bg-amber-500/[0.05] px-2 py-1 text-[9px] text-amber-200/90">
-                尚未选择项目，自动授权不会生效。
-              </p>
-            ) : null}
-          </div>
-
-          <Row
-            label="所有项目（高风险）"
-            description="忽略上面的项目列表，对所有项目自动授权；黑名单仍生效"
-          >
-            <Switch
-              checked={settings.autoApproveAllProjects}
-              onCheckedChange={(checked) => patch({ autoApproveAllProjects: checked })}
-              disabled={!settings.autoApproveAll}
-              label="所有项目自动授权"
-            />
-          </Row>
 
           <div className="space-y-1 py-1.5">
             <details className="rounded-md border border-zinc-800/70 px-2 py-1.5">
               <summary className="cursor-pointer text-[10px] text-zinc-300">
-                危险工具黑名单（{settings.autoApproveBlockedTools.length}）
+                全局危险工具黑名单（{settings.autoApproveBlockedTools.length}）
               </summary>
               <p className="mt-1 text-[9px] leading-relaxed text-zinc-600">
                 每行一个工具名。命中后不会自动授权，改为手动卡片。
               </p>
               <textarea
+                key={`global-tools-${settings.autoApproveBlockedTools.join('\n')}`}
                 defaultValue={settings.autoApproveBlockedTools.join('\n')}
                 onBlur={(event) =>
                   patch({ autoApproveBlockedTools: linesToArray(event.target.value) })
                 }
                 rows={3}
                 spellCheck={false}
-                disabled={!settings.autoApproveAll}
-                className={cn(
-                  'mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none',
-                  !settings.autoApproveAll && 'opacity-50',
-                )}
+                className="mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none"
               />
             </details>
             <details className="rounded-md border border-zinc-800/70 px-2 py-1.5">
               <summary className="cursor-pointer text-[10px] text-zinc-300">
-                危险命令/字符黑名单（{settings.autoApproveBlockedCommands.length}）
+                全局危险命令/字符黑名单（{settings.autoApproveBlockedCommands.length}）
               </summary>
               <p className="mt-1 text-[9px] leading-relaxed text-zinc-600">
                 每行一个片段。黑名单是安全网，不是绝对防护。
               </p>
               <textarea
+                key={`global-commands-${settings.autoApproveBlockedCommands.join('\n')}`}
                 defaultValue={settings.autoApproveBlockedCommands.join('\n')}
                 onBlur={(event) =>
                   patch({
@@ -456,19 +346,16 @@ export function SettingsView(): JSX.Element {
                 }
                 rows={6}
                 spellCheck={false}
-                disabled={!settings.autoApproveAll}
-                className={cn(
-                  'mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none',
-                  !settings.autoApproveAll && 'opacity-50',
-                )}
+                className="mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none"
               />
             </details>
             <p className="text-[9px] leading-relaxed text-zinc-600">
-              黑名单只影响自动授权；未通过黑名单的请求仍可在授权卡片里手动处理。
+              全局黑名单是所有会话的底线；会话详情里只能追加更严格的规则，不能移除全局规则。
+              命中黑名单的请求仍可在授权卡片里手动处理。
             </p>
             <div className="flex items-center justify-between gap-2 py-1.5">
               <p className="text-[9px] leading-relaxed text-zinc-600">
-                恢复默认值会清空项目选择、关闭“所有项目”，并重置黑名单；不会关闭自动授权总开关。
+                恢复默认值只重置两份全局黑名单，不会关闭总闸或改动会话设置。
               </p>
               <Button size="sm" variant="outline" onClick={resetAutoDefaults}>
                 恢复默认值
@@ -529,7 +416,8 @@ export function SettingsView(): JSX.Element {
 
         <Section title="关于">
           <p className="py-2 text-[9px] leading-relaxed text-zinc-500">
-            Deckgate 只读取本机事件与进程信息，不联网、不上传命令行内容，也不会自动批准或拒绝权限。
+            Deckgate 只读取本机事件与进程信息，不联网、不上传命令行内容。自动授权必须显式开启，
+            按会话生效，并受全局与会话黑名单约束。
           </p>
           <div className="py-2">
             <Button

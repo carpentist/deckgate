@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS, type WatcherApi } from '@shared/ipc'
-import type { AppSettings, SoundKind } from '@shared/types/settings'
+import type {
+  AppSettings,
+  SessionPolicyView,
+  SoundKind,
+} from '@shared/types/settings'
 import type { WatcherSnapshot } from '@shared/types/session'
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
@@ -23,6 +27,8 @@ const api: WatcherApi = {
   uninstallHooks: () => ipcRenderer.invoke(IPC_CHANNELS.uninstallHooks),
   updateSettings: (patch: Partial<AppSettings>) =>
     ipcRenderer.invoke(IPC_CHANNELS.updateSettings, patch),
+  updateSessionPolicy: (sessionId: string, patch: Partial<SessionPolicyView>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.updateSessionPolicy, sessionId, patch),
   hideWindow: () => ipcRenderer.invoke(IPC_CHANNELS.hideWindow),
   onPlaySound: (listener) => subscribe<SoundKind>(IPC_CHANNELS.playSound, listener),
   onFocusSession: (listener) => subscribe<string>(IPC_CHANNELS.focusSession, listener),

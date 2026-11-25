@@ -128,6 +128,8 @@ process.stdin.on('end', () => {
         requestId,
         sessionId: payload.session_id,
         cwd: typeof payload.cwd === 'string' ? payload.cwd : null,
+        permissionMode:
+          typeof payload.permission_mode === 'string' ? payload.permission_mode : null,
         toolName: payload.tool_name,
         toolInput: payload.tool_input,
         receivedAt: Date.now(),

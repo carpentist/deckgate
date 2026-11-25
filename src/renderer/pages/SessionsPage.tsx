@@ -83,11 +83,9 @@ export function SessionsPage(): JSX.Element {
   const hookStatus = snapshot?.hookStatus
   const hooksOutdated =
     (hookStatus?.missingEvents?.length ?? 0) > 0 || (hookStatus?.outdated ?? false)
-  const autoApproveOn =
-    (snapshot?.settings.approvalEnabled ?? false) &&
-    (snapshot?.settings.autoApproveAll ?? false)
-  const autoProjectCount = snapshot?.settings.autoApproveProjects.length ?? 0
-  const autoAllProjects = snapshot?.settings.autoApproveAllProjects ?? false
+  const autoSessionCount = Object.values(snapshot?.sessionPolicies ?? {}).filter(
+    (policy) => policy.autoApprove,
+  ).length
 
   function resetFilters(): void {
     setQuery('')
@@ -133,20 +131,9 @@ export function SessionsPage(): JSX.Element {
               : 'Hooks 未安装'}
             {hookStatus?.gateInstalled ? ' · 快速授权可用' : ''}
           </button>
-          {autoApproveOn ? (
-            <span
-              className={cn(
-                'shrink-0 rounded-full border px-1.5 py-0.5',
-                autoAllProjects || autoProjectCount > 0
-                  ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-300',
-              )}
-            >
-              {autoAllProjects
-                ? '自动授权 所有项目'
-                : autoProjectCount > 0
-                  ? `自动授权 ${autoProjectCount} 项目`
-                  : '自动授权未选项目'}
+          {autoSessionCount > 0 ? (
+            <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-300">
+              自动授权 {autoSessionCount} 会话
             </span>
           ) : null}
         </div>

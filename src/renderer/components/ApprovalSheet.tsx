@@ -2,6 +2,7 @@ import { KeyRound } from 'lucide-react'
 import { useState, type JSX } from 'react'
 import type { ApprovalRequestView } from '@shared/types/settings'
 import { formatDuration } from '@renderer/lib/format'
+import { permissionModeLabel } from '@renderer/lib/status'
 import { useNow } from '@renderer/hooks/useNow'
 import { Button } from './ui/button'
 
@@ -58,9 +59,16 @@ export function ApprovalSheet({
               <p className="truncate text-[11px] text-zinc-200">{current.projectName}</p>
               <p className="truncate text-[9px] text-zinc-500">{current.cwd}</p>
             </div>
-            <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
-              {current.toolName}
-            </span>
+            <div className="flex shrink-0 items-center gap-1">
+              {current.permissionMode !== 'default' && current.permissionMode !== 'manual' ? (
+                <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-[9px] text-zinc-500">
+                  {permissionModeLabel(current.permissionMode)}
+                </span>
+              ) : null}
+              <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+                {current.toolName}
+              </span>
+            </div>
           </div>
 
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-900/60 p-2 text-[10px] leading-relaxed text-zinc-300">

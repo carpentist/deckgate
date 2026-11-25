@@ -1,4 +1,8 @@
-import type { AppSettings, ApprovalRequestView } from './settings'
+import type {
+  AppSettings,
+  ApprovalRequestView,
+  SessionPolicyView,
+} from './settings'
 
 export const SESSION_STATUSES = [
   'RUNNING',
@@ -44,6 +48,7 @@ export interface Session {
   statusReason: string
   confidence: Confidence
   currentTool: string | null
+  permissionMode: string | null
   lastError: string | null
   attention: Attention | null
   startedAt: number
@@ -79,4 +84,5 @@ export interface WatcherSnapshot {
   hookStatus: HookStatus
   settings: AppSettings
   approvals: ApprovalRequestView[]
+  sessionPolicies: Record<string, SessionPolicyView>
 }

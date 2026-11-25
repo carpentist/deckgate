@@ -8,6 +8,8 @@
 
 Windows 10/11 x64 · Electron 45 · Local-first · MIT
 
+> **0.3.0 是最后一个功能版本，定位为个人自用工具。** 不再跟随 Claude Code 的新权限能力扩展；需要时请按 README 自行构建或修改。
+
 ---
 
 ## 为什么不是又一个通知器
@@ -28,7 +30,7 @@ Deckgate 做的是另一件事：把 **PermissionRequest 变成一次本地交�
 - **多任务叠卡**：右下角会露出后两张卡片；当前卡片是最上面那张。
 - **滚轮切换**：在卡片里滚动滚轮切换任务，带模糊、旋转和叠卡回弹动画。
 - **就地授权**：需要你处理时，工具名、参数摘要、倒计时和“允许 / 拒绝 / 原终端”按钮直接出现在卡片里。
-- **托盘常驻**：关闭窗口只隐藏；托盘图标可以显示待处理数量、置顶、切迷你条、停止自动授权或退出。
+- **托盘常驻**：关闭窗口只隐藏；托盘图标可以显示待处理数量、置顶、切迷你条、停止所有会话自动授权或退出。
 - **历史可查**：SQLite 记录会话、事件、通知和设置，按天保留，可清空。
 
 > 迷你窗口是完全透明的：屏幕上没有窗口边框，只看到卡片和它后面的叠卡。
@@ -83,10 +85,11 @@ flowchart LR
 | 进程识别 | 结合 `~/.claude/sessions`、PID 和进程存活探测识别异常退出 |
 | 事件时间线 | 当前工具、错误摘要、最近活动、最近事件 |
 | 应用内授权 | 可选，默认关闭；普通工具请求可在卡片上允许或拒绝 |
-| 自动授权 | 可选，高风险，默认关闭；按项目或所有项目生效，带工具/命令黑名单 |
+| 会话级自动授权 | 可选，高风险，默认关闭；先开总闸，再在单个会话详情中开启 |
+| 分层黑名单 | 全局黑名单是所有会话的底线；每个会话只能追加更严格的工具/命令规则 |
 | 安全看门狗 | 应用空闲不会误回退；进程卡死约 6 秒才回退终端 |
 | 通知与声音 | Windows 原生通知、四类 Web Audio 提示音、冷却时间 |
-| 托盘 | 待处理数量、显示/隐藏、置顶、迷你条、停止自动授权、退出 |
+| 托盘 | 待处理数量、显示/隐藏、置顶、迷你条、停止所有会话自动授权、退出 |
 | 数据管理 | SQLite 历史、保留天数、清除历史、彻底卸载清理 |
 | 隐私 | 不联网、不存提示词、不存工具参数全文、不存工具输出 |
 
@@ -128,7 +131,7 @@ Hooks 在会话启动时加载。安装前已经打开的 Claude Code 会话需�
 
 ## 应用内授权（可选，默认关闭）
 
-开启后：
+设置里的“允许 Deckgate 参与权限”是全局总闸。开启后：
 
 1. Claude Code 发出普通工具权限请求。
 2. 迷你卡片或主窗口弹出授权卡片。
@@ -138,20 +141,29 @@ Hooks 在会话启动时加载。安装前已经打开的 Claude Code 会话需�
 
 默认等待上限是 10 分钟。应用只是空闲（你没有操作）不会触发回退；只有应用卡死或心跳中断才会。
 
-### 自动授权（高风险，默认关闭）
+### 会话级自动授权（高风险，默认关闭）
 
-这是一个显式选择的高风险模式：
+自动授权不再是全局项目列表，而是**总闸 + 会话开关**：
 
-- 打开总开关后，默认只对勾选项目自动允许普通工具权限；也可以开启“所有项目”。
-- 默认不再因为 `Write`、`Edit`、`NotebookEdit` 或 `;`、`&&`、`||`、`|`、`>`、`<`、多行命令而拦截。
-- 默认黑名单保留破坏性片段：`rm -rf`、`remove-item`、`del /f`、`del /s`、`rd /s`、`rmdir /s`、`format`、`diskpart`、`shutdown`、`reg delete`、`reg add`、`takeown`、`icacls`、`git reset --hard`、`git clean -fd`、`invoke-expression`、`set-executionpolicy` 等，可在设置中编辑。
-- 未勾选项目、命中黑名单或 `AskUserQuestion` 仍然走手动卡片或原终端。
-- 总开关关闭时，项目选择、所有项目、黑名单控件都会被禁用，只保存配置、不生效。
-- “恢复默认值”会清空项目选择、关闭所有项目、重置两份黑名单，但不会关闭总开关。
-- 托盘菜单提供“停止自动授权（立即）”。
-- **不会修改** `~/.claude/settings.json` 中的权限规则，也不会添加“总是允许”条目；但匹配的请求确实会绕过 Claude Code 的权限确认。
+- 先在设置里打开“允许 Deckgate 参与权限”总闸。
+- 再进入单个会话详情，打开“本会话自动授权”。
+- 普通请求会被直接放行；命中全局或会话黑名单时仍会弹出手动卡片。
+- 会话结束、进程退出或应用退出时，会话级开关自动清零。
+- 托盘菜单提供“停止所有会话自动授权（立即）”；关闭总闸也会立即暂停全部自动授权。
+- **不会修改** `~/.claude/settings.json` 中的权限规则，也不会添加“总是允许”条目。
 
-黑名单是安全网，不是命令沙箱。清空它或在所有项目上开启自动授权，风险由你承担。
+全局黑名单在设置中编辑；会话详情里可以追加本会话的工具/命令黑名单，但只能加严，不能移除全局规则。默认黑名单保留破坏性片段：`rm -rf`、`remove-item`、`del /f`、`del /s`、`rd /s`、`rmdir /s`、`format`、`diskpart`、`shutdown`、`reg delete`、`reg add`、`takeown`、`icacls`、`git reset --hard`、`git clean -fd`、`invoke-expression`、`set-executionpolicy` 等。
+
+### 与 Claude Code 权限模式的边界
+
+Deckgate 只在 Claude Code 的 `default` / `manual` / `acceptEdits` 模式下代答普通提示。遇到以下模式时，Deckgate 不接管，只显示模式和提醒：
+
+- `auto`：由 Claude 的分类器判断；Hook 的 allow 不能可靠覆盖它。
+- `dontAsk`：Claude 直接拒绝未预先允许的调用。
+- `plan`：计划模式，不执行工具。
+- `bypassPermissions`：跳过权限检查。
+
+显式的 `permissions.deny` 和 `permissions.ask` 规则也优先于 Deckgate。黑名单是安全网，不是命令沙箱。
 
 ---
 
@@ -197,7 +209,7 @@ SQLite 数据库：
 ```bash
 npm install
 npm run dev        # 开发模式
-npm test           # 61 个单元/集成测试
+npm test           # 76 个单元/集成测试
 npm run typecheck  # TypeScript 检查
 npm run build      # 构建 main / preload / renderer
 npm run dist       # 生成 Windows NSIS 安装包
@@ -232,11 +244,14 @@ docs/               阶段一技术验证与设计文档
 
 ## 状态与已知限制
 
-这是一个面向真实日常使用的实验性工具，不是官方 Claude Code 功能。
+这是一个个人自用的实验性工具，不是官方 Claude Code 功能，也不再跟随 Claude Code 的新权限能力持续扩展。
 
 - 仅支持 **Windows 10/11 x64**。
-- Hooks 在会话启动时快照，安装后需要重启已有会话。
+- Hooks 在会话启动时快照，安装或升级后需要重启已有会话；Hooks 版本变更时设置页会提示更新。
 - 无头 `claude -p` 模式下的权限请求会被 Claude Code 直接拒绝，不触发 `PermissionRequest`。
+- Claude Code 处于 `auto` / `dontAsk` / `plan` / `bypassPermissions` 模式时，Deckgate 只监控，不代答。
+- 显式的 `permissions.deny` / `permissions.ask` 规则优先于 Deckgate；ask 规则命中时请以原终端提示为准。
+- 会话级自动授权保存在内存中，应用退出、会话结束或进程退出后自动清零。
 - `Stop` 只代表回合结束，不代表进程退出；`SessionEnd` 也不代表失败。
 - 无法可靠识别原终端窗口或标签页，因此不提供自动聚焦；请看详情页提示手动返回。
 - 进程识别依赖 `~/.claude/sessions` 的内部格式；格式变化时会降级为未知状态，而不是猜测。
@@ -265,9 +280,9 @@ npm run typecheck
 
 It is not another notification bot. It turns `PermissionRequest` into a local handoff: every session is visible in one small stacked-card window, and permission prompts can be allowed or denied right there. If the app is closed, frozen, or you choose “terminal”, the hook falls back to the original terminal. It never edits Claude Code’s permission rules.
 
-Highlights: transparent stacked-card mini mode with wheel switching, inline approvals, per-project auto-approval with blacklists and a tray kill switch, SQLite history, and no network access. Defaults are conservative: approval and auto-approval are off.
+Highlights: transparent stacked-card mini mode with wheel switching, inline approvals, a global approval master switch with per-session auto-approval and layered blacklists, SQLite history, and no network access. Defaults are conservative: approval and auto-approval are off. Deckgate only answers prompts in Claude Code's `default` / `manual` / `acceptEdits` modes; `auto`, `dontAsk`, `plan`, and `bypassPermissions` are left to Claude Code.
 
-Built with Electron, React, TypeScript, and Tailwind CSS. Tested on Windows 11 x64 with Claude Code 2.1.126.
+Built with Electron, React, TypeScript, and Tailwind CSS. Tested on Windows 11 x64 with Claude Code 2.1.325. This is the final 0.3.0 personal-use release.
 
 ---
 

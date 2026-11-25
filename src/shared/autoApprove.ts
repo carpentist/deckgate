@@ -1,18 +1,8 @@
-export function normalizeProjectPath(path: string): string {
-  const trimmed = path.trim()
-  if (!trimmed) return ''
-  return trimmed.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
-}
+const INTERCEPTABLE_PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits'])
 
-export function isProjectAutoApproved(cwd: string | null, projects: string[]): boolean {
-  if (!cwd) return false
-  const normalizedCwd = normalizeProjectPath(cwd)
-  if (!normalizedCwd) return false
-
-  return projects.some((project) => {
-    const normalizedProject = normalizeProjectPath(project)
-    return normalizedProject !== '' && normalizedCwd === normalizedProject
-  })
+export function isPermissionModeInterceptable(mode: string | null | undefined): boolean {
+  if (!mode) return true
+  return INTERCEPTABLE_PERMISSION_MODES.has(mode.trim())
 }
 
 export function getToolCommand(toolInput: unknown): string | null {
@@ -43,4 +33,47 @@ export function findBlockedCommand(
     if (text.includes(pattern)) return blocked.trim()
   }
   return null
+}
+
+export interface AutoApproveEvaluationInput {
+  toolName: string
+  toolInput: unknown
+  globalBlockedTools: string[]
+  globalBlockedCommands: string[]
+  sessionBlockedTools: string[]
+  sessionBlockedCommands: string[]
+}
+
+export interface AutoApproveEvaluation {
+  allowed: boolean
+  reason: string | null
+}
+
+export function evaluateAutoApprove(
+  input: AutoApproveEvaluationInput,
+): AutoApproveEvaluation {
+  const globalTool = findBlockedTool(input.toolName, input.globalBlockedTools)
+  if (globalTool) {
+    return { allowed: false, reason: `工具 ${globalTool} 在全局黑名单中` }
+  }
+
+  const sessionTool = findBlockedTool(input.toolName, input.sessionBlockedTools)
+  if (sessionTool) {
+    return { allowed: false, reason: `工具 ${sessionTool} 在本会话黑名单中` }
+  }
+
+  const command = getToolCommand(input.toolInput)
+  if (command) {
+    const globalCommand = findBlockedCommand(command, input.globalBlockedCommands)
+    if (globalCommand) {
+      return { allowed: false, reason: `命中全局危险命令规则：${globalCommand}` }
+    }
+
+    const sessionCommand = findBlockedCommand(command, input.sessionBlockedCommands)
+    if (sessionCommand) {
+      return { allowed: false, reason: `命中本会话危险命令规则：${sessionCommand}` }
+    }
+  }
+
+  return { allowed: true, reason: null }
 }

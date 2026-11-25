@@ -7,12 +7,13 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { isProjectAutoApproved, normalizeProjectPath } from '@shared/autoApprove'
+import { isPermissionModeInterceptable } from '@shared/autoApprove'
+import { DEFAULT_SESSION_POLICY } from '@shared/types/settings'
 import type { Session } from '@shared/types/session'
 import { useNow } from '@renderer/hooks/useNow'
 import { useWatcherCommands } from '@renderer/hooks/useWatcherCommands'
 import { formatDateTime, formatRelative } from '@renderer/lib/format'
-import { ATTENTION_META } from '@renderer/lib/status'
+import { ATTENTION_META, permissionModeLabel } from '@renderer/lib/status'
 import { cn } from '@renderer/lib/utils'
 import { useWatcherStore } from '@renderer/stores/watcher'
 import { StatusBadge } from './StatusBadge'
@@ -36,10 +37,12 @@ function describeError(error: unknown): string {
 export function SessionDetail({ session }: { session: Session }): JSX.Element {
   const backToList = useWatcherStore((state) => state.backToList)
   const snapshot = useWatcherStore((state) => state.snapshot)
-  const { updateSettings, hideWindow } = useWatcherCommands()
+  const { updateSessionPolicy, hideWindow } = useWatcherCommands()
   const settings = snapshot?.settings
-  const autoApproveProjects = settings?.autoApproveProjects ?? []
-  const projectAutoApproved = isProjectAutoApproved(session.cwd, autoApproveProjects)
+  const policy = snapshot?.sessionPolicies?.[session.sessionId] ?? DEFAULT_SESSION_POLICY
+  const globalApproval = settings?.approvalEnabled ?? false
+  const modeInterceptable = isPermissionModeInterceptable(session.permissionMode)
+  const canToggleAuto = globalApproval && modeInterceptable
   const now = useNow()
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null)
   const timer = useRef<number | null>(null)
@@ -82,13 +85,22 @@ export function SessionDetail({ session }: { session: Session }): JSX.Element {
     }
   }
 
-  function toggleProjectAutoApproved(checked: boolean): void {
-    if (!session.cwd) return
-    const key = normalizeProjectPath(session.cwd)
-    const next = checked
-      ? [...autoApproveProjects.filter((project) => normalizeProjectPath(project) !== key), session.cwd]
-      : autoApproveProjects.filter((project) => normalizeProjectPath(project) !== key)
-    void updateSettings({ autoApproveProjects: next })
+  function toggleSessionAutoApproved(checked: boolean): void {
+    void updateSessionPolicy(session.sessionId, { autoApprove: checked })
+  }
+
+  function linesToArray(value: string): string[] {
+    return value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+  }
+
+  function updatePolicyList(
+    field: 'blockedTools' | 'blockedCommands',
+    value: string,
+  ): void {
+    void updateSessionPolicy(session.sessionId, { [field]: linesToArray(value) })
   }
 
   const attentionMeta = session.attention ? ATTENTION_META[session.attention.type] : null
@@ -139,7 +151,9 @@ export function SessionDetail({ session }: { session: Session }): JSX.Element {
               {session.attention.reason}
             </p>
             <p className="mt-1.5 text-[9px] leading-relaxed opacity-60">
-              请回到启动该会话的终端处理。本应用不会自动批准或拒绝。
+              {session.attention.type === 'permission'
+                ? '可在授权卡片中处理，或回到启动该会话的终端。'
+                : '请回到启动该会话的终端处理。本应用不会覆盖 Claude 的权限规则。'}
             </p>
           </div>
         ) : null}
@@ -200,19 +214,62 @@ export function SessionDetail({ session }: { session: Session }): JSX.Element {
           <Info label="最近活动" value={formatRelative(session.lastActivityAt, now)} />
         </div>
 
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800/70 bg-zinc-900/30 px-2.5 py-2">
-          <div className="min-w-0">
-            <p className="text-[10px] text-zinc-300">自动授权此项目</p>
-            <p className="mt-0.5 text-[9px] text-zinc-600">
-              需开启自动授权总开关；危险工具/命令仍会转为手动卡片
-            </p>
+        <div className="space-y-2 rounded-lg border border-zinc-800/70 bg-zinc-900/30 px-2.5 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] text-zinc-300">本会话自动授权</p>
+              <p className="mt-0.5 text-[9px] text-zinc-500">
+                Claude 模式：{permissionModeLabel(session.permissionMode)}
+              </p>
+              <p className="mt-0.5 text-[9px] leading-relaxed text-zinc-600">
+                {!globalApproval
+                  ? '应用内授权总闸未开启；请求都会回到原终端。'
+                  : !modeInterceptable
+                    ? '当前模式由 Claude 自行判断，Deckgate 不代答。'
+                    : policy.autoApprove
+                      ? '普通请求将自动放行；命中黑名单仍会出卡片。'
+                      : '开启后，普通请求不再弹卡片。'}
+              </p>
+            </div>
+            <Switch
+              checked={policy.autoApprove}
+              onCheckedChange={toggleSessionAutoApproved}
+              disabled={!canToggleAuto}
+              label="本会话自动授权"
+            />
           </div>
-          <Switch
-            checked={projectAutoApproved}
-            onCheckedChange={toggleProjectAutoApproved}
-            disabled={!settings?.autoApproveAll || !session.cwd}
-            label="自动授权此项目"
-          />
+
+          <details className="rounded-md border border-zinc-800/70 px-2 py-1.5">
+            <summary className="cursor-pointer text-[10px] text-zinc-400">
+              本会话追加黑名单（工具 {policy.blockedTools.length} / 命令{' '}
+              {policy.blockedCommands.length}）
+            </summary>
+            <p className="mt-1 text-[9px] leading-relaxed text-zinc-600">
+              继承全局黑名单：工具 {settings?.autoApproveBlockedTools.length ?? 0} 条、命令{' '}
+              {settings?.autoApproveBlockedCommands.length ?? 0} 条。会话只能加严，不能移除全局规则。
+            </p>
+            <textarea
+              key={`session-tools-${policy.blockedTools.join('\n')}`}
+              defaultValue={policy.blockedTools.join('\n')}
+              onBlur={(event) => updatePolicyList('blockedTools', event.target.value)}
+              rows={2}
+              spellCheck={false}
+              placeholder="每行一个工具名，例如 Write"
+              className="mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none"
+            />
+            <textarea
+              key={`session-commands-${policy.blockedCommands.join('\n')}`}
+              defaultValue={policy.blockedCommands.join('\n')}
+              onBlur={(event) => updatePolicyList('blockedCommands', event.target.value)}
+              rows={3}
+              spellCheck={false}
+              placeholder="每行一个命令片段，例如 rm -rf"
+              className="mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none"
+            />
+            <p className="mt-1 text-[9px] leading-relaxed text-zinc-600">
+              黑名单只影响自动授权；命中后仍可在授权卡片手动处理。会话结束或应用退出后清空。
+            </p>
+          </details>
         </div>
 
         {session.lastError ? (

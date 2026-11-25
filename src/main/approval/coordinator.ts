@@ -3,12 +3,14 @@ import { promises as fs } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import {
-  findBlockedCommand,
-  findBlockedTool,
-  getToolCommand,
-  isProjectAutoApproved,
+  evaluateAutoApprove,
+  isPermissionModeInterceptable,
 } from '@shared/autoApprove'
-import type { AppSettings, ApprovalRequestView } from '@shared/types/settings'
+import type {
+  AppSettings,
+  ApprovalRequestView,
+  SessionPolicyView,
+} from '@shared/types/settings'
 
 const MAX_REQUEST_BYTES = 512 * 1024
 const MAX_PREVIEW_LENGTH = 4000
@@ -26,10 +28,11 @@ interface PendingApproval {
 interface ApprovalCoordinatorOptions {
   appDataDir: string
   getSettings: () => AppSettings
+  getSessionPolicy: (sessionId: string) => SessionPolicyView
   getSessionInfo: (
     sessionId: string,
     cwd: string | null,
-  ) => { projectName: string; cwd: string }
+  ) => { projectName: string; cwd: string; permissionMode?: string | null }
   onRequestsChanged: () => void
   onRequest: (request: ApprovalRequestView) => void
   onDecision?: (request: ApprovalRequestView, behavior: ApprovalBehavior) => void
@@ -206,7 +209,8 @@ export class ApprovalCoordinator {
       return
     }
 
-    if (!this.options.getSettings().approvalEnabled) {
+    const settings = this.options.getSettings()
+    if (!settings.approvalEnabled) {
       this.sendFallback(socket)
       return
     }
@@ -216,6 +220,11 @@ export class ApprovalCoordinator {
     const toolName = message['toolName']
     const toolInput = message['toolInput']
     const cwd = typeof message['cwd'] === 'string' ? message['cwd'] : null
+    const permissionMode =
+      typeof message['permissionMode'] === 'string' &&
+      message['permissionMode'].length <= 50
+        ? message['permissionMode']
+        : null
 
     if (
       typeof requestId !== 'string' ||
@@ -233,36 +242,37 @@ export class ApprovalCoordinator {
       return
     }
 
-    const settings = this.options.getSettings()
+    const sessionInfo = this.options.getSessionInfo(sessionId, cwd)
+    const effectiveMode = permissionMode ?? sessionInfo.permissionMode ?? null
+
+    // Claude Code's auto/dontAsk/plan/bypass modes decide prompts themselves.
+    // A PermissionRequest hook cannot reliably answer them, so leave the prompt
+    // in the original terminal instead of pretending Deckgate can approve it.
+    if (!isPermissionModeInterceptable(effectiveMode)) {
+      this.sendFallback(socket)
+      return
+    }
+
     const timeoutMs = Math.min(600_000, Math.max(60_000, settings.approvalWaitSec * 1000))
     const receivedAt = Date.now()
-    const sessionInfo = this.options.getSessionInfo(sessionId, cwd)
+    const policy = this.options.getSessionPolicy(sessionId)
     let autoApproveBlockedReason: string | null = null
 
-    if (settings.approvalEnabled && settings.autoApproveAll) {
-      const projectAllowed =
-        settings.autoApproveAllProjects ||
-        isProjectAutoApproved(sessionInfo.cwd || cwd, settings.autoApproveProjects)
-      if (!projectAllowed) {
-        autoApproveBlockedReason = '当前项目未加入自动授权'
-      } else {
-        const blockedTool = findBlockedTool(toolName, settings.autoApproveBlockedTools)
-        if (blockedTool) {
-          autoApproveBlockedReason = `工具 ${blockedTool} 在自动授权黑名单中`
-        } else {
-          const command = getToolCommand(toolInput)
-          const blockedCommand = command
-            ? findBlockedCommand(command, settings.autoApproveBlockedCommands)
-            : null
-          if (blockedCommand) {
-            autoApproveBlockedReason = `命中危险命令规则：${blockedCommand}`
-          } else {
-            this.sendDecision(socket, requestId, 'allow')
-            this.options.onAutoApproved?.(sessionId, toolName)
-            return
-          }
-        }
+    if (policy.autoApprove) {
+      const evaluation = evaluateAutoApprove({
+        toolName,
+        toolInput,
+        globalBlockedTools: settings.autoApproveBlockedTools,
+        globalBlockedCommands: settings.autoApproveBlockedCommands,
+        sessionBlockedTools: policy.blockedTools,
+        sessionBlockedCommands: policy.blockedCommands,
+      })
+      if (evaluation.allowed) {
+        this.sendDecision(socket, requestId, 'allow')
+        this.options.onAutoApproved?.(sessionId, toolName)
+        return
       }
+      autoApproveBlockedReason = evaluation.reason
     }
 
     const view: ApprovalRequestView = {
@@ -274,6 +284,7 @@ export class ApprovalCoordinator {
       inputPreview: formatToolInput(toolInput),
       receivedAt,
       expiresAt: receivedAt + timeoutMs,
+      permissionMode: effectiveMode ?? 'default',
       autoApproveBlockedReason,
     }
 

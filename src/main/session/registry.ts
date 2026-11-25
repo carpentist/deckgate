@@ -171,6 +171,7 @@ export class SessionRegistry {
       session.cwd = event.cwd
       session.projectName = projectNameFromCwd(event.cwd)
     }
+    if (event.permissionMode) session.permissionMode = event.permissionMode
     session.hookDriven = true
 
     const outOfOrder = session.lastEventAt > 0 && event.receivedAt < session.lastEventAt
@@ -242,6 +243,7 @@ export class SessionRegistry {
         statusReason: derived.reason,
         confidence: 'medium',
         currentTool: null,
+        permissionMode: null,
         lastError: null,
         attention: derived.attention,
         startedAt: file.startedAt,
@@ -423,6 +425,7 @@ export class SessionRegistry {
       statusReason: '已收到事件，等待可识别的状态',
       confidence: 'medium',
       currentTool: null,
+      permissionMode: event.permissionMode,
       lastError: null,
       attention: null,
       startedAt: event.receivedAt,

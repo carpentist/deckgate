@@ -1,5 +1,5 @@
 import type { HookStatus, WatcherSnapshot } from './types/session'
-import type { AppSettings, SoundKind } from './types/settings'
+import type { AppSettings, SessionPolicyView, SoundKind } from './types/settings'
 
 export const IPC_CHANNELS = {
   getSnapshot: 'watcher:get-snapshot',
@@ -11,6 +11,7 @@ export const IPC_CHANNELS = {
   installHooks: 'watcher:install-hooks',
   uninstallHooks: 'watcher:uninstall-hooks',
   updateSettings: 'watcher:update-settings',
+  updateSessionPolicy: 'watcher:update-session-policy',
   hideWindow: 'watcher:hide-window',
   playSound: 'watcher:play-sound',
   focusSession: 'watcher:focus-session',
@@ -30,6 +31,10 @@ export interface WatcherApi {
   installHooks: () => Promise<HookStatus>
   uninstallHooks: () => Promise<HookStatus>
   updateSettings: (patch: Partial<AppSettings>) => Promise<WatcherSnapshot>
+  updateSessionPolicy: (
+    sessionId: string,
+    patch: Partial<SessionPolicyView>,
+  ) => Promise<WatcherSnapshot>
   hideWindow: () => Promise<void>
   onPlaySound: (listener: (kind: SoundKind) => void) => () => void
   onFocusSession: (listener: (sessionId: string) => void) => () => void

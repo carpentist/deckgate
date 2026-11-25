@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { AppSettings } from '@shared/types/settings'
+import type { AppSettings, SessionPolicyView } from '@shared/types/settings'
 import { useWatcherStore } from '@renderer/stores/watcher'
 
 type BusyAction = 'refresh' | 'install' | 'uninstall'
@@ -17,6 +17,10 @@ export function useWatcherCommands(): {
   install: () => Promise<void>
   uninstall: () => Promise<void>
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>
+  updateSessionPolicy: (
+    sessionId: string,
+    patch: Partial<SessionPolicyView>,
+  ) => Promise<void>
   hideWindow: () => Promise<void>
   clearHistory: () => Promise<void>
 } {
@@ -92,6 +96,22 @@ export function useWatcherCommands(): {
     [setSnapshot],
   )
 
+  const updateSessionPolicy = useCallback(
+    async (sessionId: string, patch: Partial<SessionPolicyView>) => {
+      const api = window.watcher
+      if (!api) {
+        setError('无法连接主进程')
+        return
+      }
+      try {
+        setSnapshot(await api.updateSessionPolicy(sessionId, patch))
+      } catch (cause) {
+        setError(describeError(cause))
+      }
+    },
+    [setSnapshot],
+  )
+
   const hideWindow = useCallback(async () => {
     try {
       await window.watcher?.hideWindow()
@@ -122,6 +142,7 @@ export function useWatcherCommands(): {
     install,
     uninstall,
     updateSettings,
+    updateSessionPolicy,
     hideWindow,
     clearHistory,
   }

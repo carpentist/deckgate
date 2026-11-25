@@ -11,9 +11,6 @@ export interface AppSettings {
   miniMode: boolean
   approvalEnabled: boolean
   approvalWaitSec: number
-  autoApproveAll: boolean
-  autoApproveAllProjects: boolean
-  autoApproveProjects: string[]
   autoApproveBlockedTools: string[]
   autoApproveBlockedCommands: string[]
   showOnApproval: boolean
@@ -35,9 +32,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   miniMode: false,
   approvalEnabled: false,
   approvalWaitSec: 600,
-  autoApproveAll: false,
-  autoApproveAllProjects: false,
-  autoApproveProjects: [],
   autoApproveBlockedTools: [],
   autoApproveBlockedCommands: [
     'rm -rf',
@@ -69,6 +63,18 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 export type SoundKind = 'attention' | 'success' | 'error'
 
+export interface SessionPolicyView {
+  autoApprove: boolean
+  blockedTools: string[]
+  blockedCommands: string[]
+}
+
+export const DEFAULT_SESSION_POLICY: SessionPolicyView = {
+  autoApprove: false,
+  blockedTools: [],
+  blockedCommands: [],
+}
+
 export interface ApprovalRequestView {
   requestId: string
   sessionId: string
@@ -78,5 +84,6 @@ export interface ApprovalRequestView {
   inputPreview: string
   receivedAt: number
   expiresAt: number
+  permissionMode: string
   autoApproveBlockedReason: string | null
 }

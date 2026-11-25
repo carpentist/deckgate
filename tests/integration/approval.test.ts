@@ -5,8 +5,10 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_APP_SETTINGS,
+  DEFAULT_SESSION_POLICY,
   type AppSettings,
   type ApprovalRequestView,
+  type SessionPolicyView,
 } from '@shared/types/settings'
 import {
   ApprovalCoordinator,
@@ -18,6 +20,7 @@ type Message = Record<string, unknown>
 let root: string
 let previousPipe: string | undefined
 let settings: AppSettings
+let policy: SessionPolicyView
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs = 3000): Promise<T> {
   return Promise.race([
@@ -113,6 +116,7 @@ async function sendPermissionRequest(
       requestId: 'req-1',
       sessionId: 'session-1',
       cwd: 'C:\\project',
+      permissionMode: 'default',
       toolName: 'PowerShell',
       toolInput: { command: 'git status' },
       receivedAt: Date.now(),
@@ -126,6 +130,7 @@ beforeEach(async () => {
   previousPipe = process.env['DECKGATE_APPROVAL_PIPE']
   process.env['DECKGATE_APPROVAL_PIPE'] = `\\\\.\\pipe\\deckgate-approval-test-${process.pid}-${Math.random().toString(36).slice(2, 8)}`
   settings = { ...DEFAULT_APP_SETTINGS, approvalEnabled: true, approvalWaitSec: 600 }
+  policy = { ...DEFAULT_SESSION_POLICY }
 })
 
 afterEach(async () => {
@@ -148,6 +153,7 @@ describe('ApprovalCoordinator', () => {
     const coordinator = new ApprovalCoordinator({
       appDataDir: root,
       getSettings: () => settings,
+      getSessionPolicy: () => policy,
       getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
       onRequestsChanged: () => undefined,
       onRequest: (request) => resolveRequest(request),
@@ -196,6 +202,7 @@ describe('ApprovalCoordinator', () => {
     const coordinator = new ApprovalCoordinator({
       appDataDir: root,
       getSettings: () => settings,
+      getSessionPolicy: () => policy,
       getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
       onRequestsChanged: () => undefined,
       onRequest: (request) => resolveRequest(request),
@@ -220,14 +227,8 @@ describe('ApprovalCoordinator', () => {
     }
   })
 
-  it('auto-approves a tool only when its project is selected and not blacklisted', async () => {
-    settings = {
-      ...settings,
-      autoApproveAll: true,
-      autoApproveProjects: ['C:\\project'],
-      autoApproveBlockedTools: [],
-      autoApproveBlockedCommands: [],
-    }
+  it('auto-approves when the session policy is enabled and no blacklist matches', async () => {
+    policy = { autoApprove: true, blockedTools: [], blockedCommands: [] }
     let requestCalled = false
     let resolveAuto: (value: string) => void = () => undefined
     const autoApproved = new Promise<string>((resolve) => {
@@ -237,6 +238,7 @@ describe('ApprovalCoordinator', () => {
     const coordinator = new ApprovalCoordinator({
       appDataDir: root,
       getSettings: () => settings,
+      getSessionPolicy: () => policy,
       getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
       onRequestsChanged: () => undefined,
       onRequest: () => {
@@ -269,64 +271,8 @@ describe('ApprovalCoordinator', () => {
     }
   })
 
-  it('auto-approves any project when all projects are enabled', async () => {
-    settings = {
-      ...settings,
-      autoApproveAll: true,
-      autoApproveAllProjects: true,
-      autoApproveProjects: [],
-      autoApproveBlockedTools: [],
-      autoApproveBlockedCommands: [],
-    }
-    let requestCalled = false
-    let resolveAuto: (value: string) => void = () => undefined
-    const autoApproved = new Promise<string>((resolve) => {
-      resolveAuto = resolve
-    })
-
-    const coordinator = new ApprovalCoordinator({
-      appDataDir: root,
-      getSettings: () => settings,
-      getSessionInfo: () => ({ projectName: 'other', cwd: 'C:\\other' }),
-      onRequestsChanged: () => undefined,
-      onRequest: () => {
-        requestCalled = true
-      },
-      onAutoApproved: (sessionId) => resolveAuto(sessionId),
-    })
-    await coordinator.start()
-
-    const socket = await connectClient()
-    try {
-      const reader = createMessageReader(socket)
-      const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
-      await sendPermissionRequest(socket, token, {
-        requestId: 'req-all-projects',
-        cwd: 'C:\\other',
-      })
-
-      const response = await withTimeout(
-        reader.next((message) => message.type === 'decision'),
-      )
-      expect(response).toMatchObject({
-        type: 'decision',
-        requestId: 'req-all-projects',
-        behavior: 'allow',
-      })
-      expect(await withTimeout(autoApproved)).toBe('session-1')
-      expect(requestCalled).toBe(false)
-    } finally {
-      socket.destroy()
-      coordinator.stop()
-    }
-  })
-
-  it('keeps a manual card when the project is not selected', async () => {
-    settings = {
-      ...settings,
-      autoApproveAll: true,
-      autoApproveProjects: ['C:\\other-project'],
-    }
+  it('keeps a manual card when the session policy is off', async () => {
+    policy = { autoApprove: false, blockedTools: [], blockedCommands: [] }
     let resolveRequest: (view: ApprovalRequestView) => void = () => undefined
     const requestReceived = new Promise<ApprovalRequestView>((resolve) => {
       resolveRequest = resolve
@@ -335,6 +281,7 @@ describe('ApprovalCoordinator', () => {
     const coordinator = new ApprovalCoordinator({
       appDataDir: root,
       getSettings: () => settings,
+      getSessionPolicy: () => policy,
       getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
       onRequestsChanged: () => undefined,
       onRequest: (request) => resolveRequest(request),
@@ -345,10 +292,11 @@ describe('ApprovalCoordinator', () => {
     try {
       const reader = createMessageReader(socket)
       const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
-      await sendPermissionRequest(socket, token, { requestId: 'req-project' })
+      await sendPermissionRequest(socket, token, { requestId: 'req-manual' })
 
       const request = await withTimeout(requestReceived)
-      expect(request.autoApproveBlockedReason).toBe('当前项目未加入自动授权')
+      expect(request.permissionMode).toBe('default')
+      expect(request.autoApproveBlockedReason).toBeNull()
       coordinator.cancelAll()
       const response = await withTimeout(
         reader.next((message) => message.type === 'fallback'),
@@ -360,11 +308,118 @@ describe('ApprovalCoordinator', () => {
     }
   })
 
-  it('keeps a manual card when a blocked command matches', async () => {
+  it('falls back without a card when Claude is in auto mode', async () => {
+    policy = { autoApprove: true, blockedTools: [], blockedCommands: [] }
+    let requestCalled = false
+
+    const coordinator = new ApprovalCoordinator({
+      appDataDir: root,
+      getSettings: () => settings,
+      getSessionPolicy: () => policy,
+      getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
+      onRequestsChanged: () => undefined,
+      onRequest: () => {
+        requestCalled = true
+      },
+    })
+    await coordinator.start()
+
+    const socket = await connectClient()
+    try {
+      const reader = createMessageReader(socket)
+      const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
+      await sendPermissionRequest(socket, token, {
+        requestId: 'req-auto-mode',
+        permissionMode: 'auto',
+      })
+
+      const response = await withTimeout(
+        reader.next((message) => message.type === 'fallback'),
+      )
+      expect(response.type).toBe('fallback')
+      expect(requestCalled).toBe(false)
+      expect(coordinator.getRequests()).toHaveLength(0)
+    } finally {
+      socket.destroy()
+      coordinator.stop()
+    }
+  })
+
+  it('falls back from the session mode when an older gate omits permissionMode', async () => {
+    policy = { autoApprove: true, blockedTools: [], blockedCommands: [] }
+    let requestCalled = false
+
+    const coordinator = new ApprovalCoordinator({
+      appDataDir: root,
+      getSettings: () => settings,
+      getSessionPolicy: () => policy,
+      getSessionInfo: () => ({
+        projectName: 'project',
+        cwd: 'C:\\project',
+        permissionMode: 'auto',
+      }),
+      onRequestsChanged: () => undefined,
+      onRequest: () => {
+        requestCalled = true
+      },
+    })
+    await coordinator.start()
+
+    const socket = await connectClient()
+    try {
+      const reader = createMessageReader(socket)
+      const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
+      await sendPermissionRequest(socket, token, {
+        requestId: 'req-session-mode',
+        permissionMode: null,
+      })
+
+      const response = await withTimeout(
+        reader.next((message) => message.type === 'fallback'),
+      )
+      expect(response.type).toBe('fallback')
+      expect(requestCalled).toBe(false)
+    } finally {
+      socket.destroy()
+      coordinator.stop()
+    }
+  })
+
+  it('falls back when the global master is off', async () => {
+    settings = { ...settings, approvalEnabled: false }
+    policy = { autoApprove: true, blockedTools: [], blockedCommands: [] }
+
+    const coordinator = new ApprovalCoordinator({
+      appDataDir: root,
+      getSettings: () => settings,
+      getSessionPolicy: () => policy,
+      getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
+      onRequestsChanged: () => undefined,
+      onRequest: () => undefined,
+    })
+    await coordinator.start()
+
+    const socket = await connectClient()
+    try {
+      const reader = createMessageReader(socket)
+      const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
+      await sendPermissionRequest(socket, token, { requestId: 'req-master-off' })
+
+      const response = await withTimeout(
+        reader.next((message) => message.type === 'fallback'),
+      )
+      expect(response.type).toBe('fallback')
+      expect(coordinator.getRequests()).toHaveLength(0)
+    } finally {
+      socket.destroy()
+      coordinator.stop()
+    }
+  })
+
+  it('keeps a manual card when the global blacklist matches', async () => {
+    policy = { autoApprove: true, blockedTools: [], blockedCommands: [] }
     settings = {
       ...settings,
-      autoApproveAll: true,
-      autoApproveProjects: ['C:\\project'],
       autoApproveBlockedTools: [],
       autoApproveBlockedCommands: ['rm -rf'],
     }
@@ -376,6 +431,7 @@ describe('ApprovalCoordinator', () => {
     const coordinator = new ApprovalCoordinator({
       appDataDir: root,
       getSettings: () => settings,
+      getSessionPolicy: () => policy,
       getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
       onRequestsChanged: () => undefined,
       onRequest: (request) => resolveRequest(request),
@@ -387,12 +443,56 @@ describe('ApprovalCoordinator', () => {
       const reader = createMessageReader(socket)
       const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
       await sendPermissionRequest(socket, token, {
-        requestId: 'req-command',
+        requestId: 'req-global-command',
         toolInput: { command: 'rm -rf C:\\data' },
       })
 
       const request = await withTimeout(requestReceived)
       expect(request.autoApproveBlockedReason).toContain('rm -rf')
+      coordinator.cancelAll()
+      const response = await withTimeout(
+        reader.next((message) => message.type === 'fallback'),
+      )
+      expect(response.type).toBe('fallback')
+    } finally {
+      socket.destroy()
+      coordinator.stop()
+    }
+  })
+
+  it('keeps a manual card when a session blacklist matches', async () => {
+    policy = {
+      autoApprove: true,
+      blockedTools: [],
+      blockedCommands: ['npm publish'],
+    }
+    let resolveRequest: (view: ApprovalRequestView) => void = () => undefined
+    const requestReceived = new Promise<ApprovalRequestView>((resolve) => {
+      resolveRequest = resolve
+    })
+
+    const coordinator = new ApprovalCoordinator({
+      appDataDir: root,
+      getSettings: () => settings,
+      getSessionPolicy: () => policy,
+      getSessionInfo: () => ({ projectName: 'project', cwd: 'C:\\project' }),
+      onRequestsChanged: () => undefined,
+      onRequest: (request) => resolveRequest(request),
+    })
+    await coordinator.start()
+
+    const socket = await connectClient()
+    try {
+      const reader = createMessageReader(socket)
+      const token = (await readFile(join(root, 'approval-token.txt'), 'utf8')).trim()
+      await sendPermissionRequest(socket, token, {
+        requestId: 'req-session-command',
+        toolInput: { command: 'npm publish --access public' },
+      })
+
+      const request = await withTimeout(requestReceived)
+      expect(request.autoApproveBlockedReason).toContain('本会话')
+      expect(request.autoApproveBlockedReason).toContain('npm publish')
       coordinator.cancelAll()
       const response = await withTimeout(
         reader.next((message) => message.type === 'fallback'),

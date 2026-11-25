@@ -5,7 +5,7 @@ import { MONITORED_HOOK_EVENTS } from '@shared/types/hooks'
 
 export const RELAY_MARKER = '--ccw-hook-relay'
 export const GATE_MARKER = '--ccw-hook-gate'
-export const HOOKS_VERSION_MARKER = '--ccw-hooks-v2'
+export const HOOKS_VERSION_MARKER = '--ccw-hooks-v3'
 
 type JsonObject = Record<string, unknown>
 
